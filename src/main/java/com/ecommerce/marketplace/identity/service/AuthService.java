@@ -135,6 +135,8 @@ public class AuthService {
 
         if (request.getUserType() == UserType.SELLER) {
             user.addRole(RoleName.ROLE_SELLER);
+        } else if (request.getUserType() == UserType.DELIVERY) {
+            user.addRole(RoleName.ROLE_DELIVERY_PARTNER);
         } else {
             user.addRole(RoleName.ROLE_CUSTOMER);
         }
