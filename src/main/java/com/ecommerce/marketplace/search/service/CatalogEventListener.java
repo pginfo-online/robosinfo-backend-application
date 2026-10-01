@@ -2,6 +2,7 @@ package com.ecommerce.marketplace.search.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
@@ -13,6 +14,7 @@ import java.util.UUID;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "app.kafka", name = "enabled", havingValue = "true")
 public class CatalogEventListener {
 
     @KafkaListener(topics = "marketplace.catalog", groupId = "search-synchronizer", autoStartup = "${app.kafka.enabled:false}")

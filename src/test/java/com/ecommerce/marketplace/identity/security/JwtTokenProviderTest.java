@@ -43,5 +43,9 @@ class JwtTokenProviderTest {
     @DisplayName("Should reject invalid or tampered token")
     void testInvalidToken() {
         assertFalse(tokenProvider.validateToken("invalid.token.string"));
+        assertFalse(tokenProvider.validateToken("undefined"));
+        assertFalse(tokenProvider.validateToken("null"));
+        assertFalse(tokenProvider.validateToken(""));
+        assertFalse(tokenProvider.validateToken(null));
     }
 }

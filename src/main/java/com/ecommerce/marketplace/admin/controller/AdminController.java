@@ -2,13 +2,17 @@ package com.ecommerce.marketplace.admin.controller;
 
 
 
+import com.ecommerce.marketplace.admin.dto.AdminLedgerEntryResponse;
 import com.ecommerce.marketplace.admin.dto.AdminMetricsOverviewResponse;
+import com.ecommerce.marketplace.admin.dto.AdminOrderResponse;
+import com.ecommerce.marketplace.admin.dto.CustomerAccountResponse;
 import com.ecommerce.marketplace.admin.dto.RejectReasonRequest;
 import com.ecommerce.marketplace.admin.service.AdminService;
 import com.ecommerce.marketplace.catalog.dto.ProductResponse;
 import com.ecommerce.marketplace.common.dto.ApiResponse;
 import com.ecommerce.marketplace.common.dto.PageResponse;
 import com.ecommerce.marketplace.identity.security.UserPrincipal;
+import com.ecommerce.marketplace.order.model.OrderStatus;
 import com.ecommerce.marketplace.seller.dto.SellerProfileResponse;
 import com.ecommerce.marketplace.seller.model.SellerStatus;
 import io.swagger.v3.oas.annotations.Operation;
@@ -22,6 +26,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -107,6 +112,43 @@ public class AdminController {
     @Operation(summary = "Get platform overview metrics: GMV, order volume, active sellers, catalog counts, and disputes")
     public ResponseEntity<ApiResponse<AdminMetricsOverviewResponse>> getOverviewMetrics() {
         AdminMetricsOverviewResponse response = adminService.getPlatformMetrics();
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    // ── Orders Oversight ─────────────────────────────────────────
+    @GetMapping("/orders")
+    @Operation(summary = "List all platform orders with optional status filter")
+    public ResponseEntity<ApiResponse<PageResponse<AdminOrderResponse>>> getOrders(
+            @RequestParam(required = false) OrderStatus status,
+            @PageableDefault(size = 20) Pageable pageable) {
+        PageResponse<AdminOrderResponse> response = adminService.getAllOrders(status, pageable);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    // ── Customer Management ──────────────────────────────────────
+    @GetMapping("/customers")
+    @Operation(summary = "List all platform customer accounts")
+    public ResponseEntity<ApiResponse<PageResponse<CustomerAccountResponse>>> getCustomers(
+            @PageableDefault(size = 20) Pageable pageable) {
+        PageResponse<CustomerAccountResponse> response = adminService.getCustomers(pageable);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @PatchMapping("/customers/{id}/status")
+    @Operation(summary = "Update customer account status (ACTIVE, SUSPENDED, DELETED)")
+    public ResponseEntity<ApiResponse<CustomerAccountResponse>> updateCustomerStatus(
+            @PathVariable UUID id,
+            @RequestBody Map<String, String> body) {
+        CustomerAccountResponse response = adminService.updateCustomerStatus(id, body.get("status"));
+        return ResponseEntity.ok(ApiResponse.success("Customer status updated", response));
+    }
+
+    // ── Financial Ledger Audit ───────────────────────────────────
+    @GetMapping("/finance/ledger")
+    @Operation(summary = "Audit immutable double-entry platform financial ledger")
+    public ResponseEntity<ApiResponse<PageResponse<AdminLedgerEntryResponse>>> getFinanceLedger(
+            @PageableDefault(size = 20) Pageable pageable) {
+        PageResponse<AdminLedgerEntryResponse> response = adminService.getFinanceLedger(pageable);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 }

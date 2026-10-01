@@ -49,21 +49,61 @@ public class AuthService {
     @Value("${app.otp.max-requests-per-hour:5}")
     private int maxOtpRequestsPerHour;
 
+    @Value("${app.otp.resend-cooldown-seconds:30}")
+    private int resendCooldownSeconds;
+
+    @Value("${app.otp.test-phone:9999999999}")
+    private String testPhone;
+
+    @Value("${app.otp.test-otp:123456}")
+    private String testOtp;
+
     private final SecureRandom secureRandom = new SecureRandom();
 
     @Transactional
     public void sendOtp(SendOtpRequest request) {
+        String cleanPhone = sanitizePhone(request.getPhone());
+        if (cleanPhone.length() != 10) {
+            throw new BusinessRuleException("Phone must be a valid 10-digit Indian mobile number", "INVALID_PHONE");
+        }
+        request.setPhone(cleanPhone);
+
+        // 1. Resend Cooldown Check (e.g. 30 seconds between successive requests)
+        otpRequestRepository.findTopByPhoneAndPurposeOrderByCreatedAtDesc(cleanPhone, request.getPurpose())
+            .ifPresent(lastOtp -> {
+                if (lastOtp.getCreatedAt() != null) {
+                    long elapsedSeconds = Duration.between(lastOtp.getCreatedAt(), Instant.now()).getSeconds();
+                    if (elapsedSeconds < resendCooldownSeconds) {
+                        long remaining = resendCooldownSeconds - elapsedSeconds;
+                        throw new BusinessRuleException(
+                            "Please wait " + remaining + " seconds before requesting a new OTP.",
+                            "OTP_COOLDOWN"
+                        );
+                    }
+                }
+            });
+
+        // 2. Hourly Rate Limiting Check
         Instant oneHourAgo = Instant.now().minus(Duration.ofHours(1));
-        long recentRequests = otpRequestRepository.countByPhoneAndCreatedAtAfter(request.getPhone(), oneHourAgo);
+        long recentRequests = otpRequestRepository.countByPhoneAndCreatedAtAfter(cleanPhone, oneHourAgo);
         if (recentRequests >= maxOtpRequestsPerHour) {
             throw new BusinessRuleException("Too many OTP requests. Please try again later.", "RATE_LIMIT_EXCEEDED");
         }
 
-        String otp = String.format("%06d", secureRandom.nextInt(1_000_000));
+        // 3. Reviewer / Test Phone Support
+        String otp;
+        boolean isTestPhone = cleanPhone.equals(testPhone);
+        if (isTestPhone) {
+            otp = testOtp;
+            log.info("[TEST-ACCOUNT] Using test OTP for reviewer phone {}", cleanPhone);
+        } else {
+            otp = String.format("%06d", secureRandom.nextInt(1_000_000));
+        }
+
         String otpHash = hashString(otp);
 
         OtpRequest otpRequest = OtpRequest.builder()
-            .phone(request.getPhone())
+            .phone(cleanPhone)
             .otpHash(otpHash)
             .channel(request.getChannel())
             .purpose(request.getPurpose())
@@ -72,35 +112,62 @@ public class AuthService {
             .build();
 
         otpRequestRepository.save(otpRequest);
-        otpDeliveryService.sendOtp(request.getPhone(), otp, request.getChannel(), request.getPurpose());
+
+        // 4. Dispatch via SMS / WhatsApp if not test account
+        if (!isTestPhone) {
+            otpDeliveryService.sendOtp(cleanPhone, otp, request.getChannel(), request.getPurpose());
+        }
     }
 
     @Transactional
     public AuthResponse verifyOtp(VerifyOtpRequest request) {
+        String cleanPhone = sanitizePhone(request.getPhone());
+        request.setPhone(cleanPhone);
+
         OtpRequest otpRequest = otpRequestRepository
-            .findTopByPhoneAndPurposeOrderByCreatedAtDesc(request.getPhone(), request.getPurpose())
+            .findTopByPhoneAndPurposeOrderByCreatedAtDesc(cleanPhone, request.getPurpose())
             .orElseThrow(() -> new BusinessRuleException("No active OTP request found for this phone", "INVALID_OTP"));
 
-        if (!otpRequest.canAttempt()) {
-            throw new BusinessRuleException("OTP has expired or exceeded maximum verification attempts", "OTP_EXPIRED_OR_LOCKED");
+        if (otpRequest.isVerified()) {
+            throw new BusinessRuleException("This OTP has already been verified. Please request a new one.", "OTP_ALREADY_USED");
+        }
+
+        if (otpRequest.isExpired()) {
+            throw new BusinessRuleException("OTP has expired. Please request a new verification code.", "OTP_EXPIRED");
+        }
+
+        if (otpRequest.getAttempts() >= otpRequest.getMaxAttempts()) {
+            throw new BusinessRuleException("Maximum verification attempts exceeded. Please request a new OTP.", "MAX_ATTEMPTS_EXCEEDED");
         }
 
         otpRequest.setAttempts(otpRequest.getAttempts() + 1);
 
-        String inputHash = hashString(request.getOtp());
+        String inputOtp = request.getOtp() != null ? request.getOtp().trim() : "";
+        String inputHash = hashString(inputOtp);
         if (!inputHash.equals(otpRequest.getOtpHash())) {
             otpRequestRepository.save(otpRequest);
-            throw new BusinessRuleException("Incorrect OTP provided", "INVALID_OTP");
+            int remaining = otpRequest.getMaxAttempts() - otpRequest.getAttempts();
+            if (remaining > 0) {
+                throw new BusinessRuleException(
+                    "Incorrect OTP. " + remaining + " attempt(s) remaining.",
+                    "INVALID_OTP"
+                );
+            } else {
+                throw new BusinessRuleException(
+                    "Incorrect OTP. Maximum attempts reached. Please request a new code.",
+                    "MAX_ATTEMPTS_EXCEEDED"
+                );
+            }
         }
 
         otpRequest.setVerifiedAt(Instant.now());
         otpRequestRepository.save(otpRequest);
 
         // Find or create customer
-        User user = userRepository.findByPhone(request.getPhone())
+        User user = userRepository.findByPhone(cleanPhone)
             .orElseGet(() -> {
                 User newUser = User.builder()
-                    .phone(request.getPhone())
+                    .phone(cleanPhone)
                     .userType(UserType.CUSTOMER)
                     .status(UserStatus.ACTIVE)
                     .build();
@@ -113,6 +180,18 @@ public class AuthService {
         }
 
         return generateAuthResponse(user);
+    }
+
+    private String sanitizePhone(String rawPhone) {
+        if (rawPhone == null) return "";
+        String digits = rawPhone.replaceAll("\\D", "");
+        if (digits.length() == 12 && digits.startsWith("91")) {
+            return digits.substring(2);
+        }
+        if (digits.length() == 11 && digits.startsWith("0")) {
+            return digits.substring(1);
+        }
+        return digits;
     }
 
     @Transactional

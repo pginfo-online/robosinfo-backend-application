@@ -3,6 +3,8 @@ package com.ecommerce.marketplace.common.exception;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authorization.AuthorizationDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -15,6 +17,11 @@ import java.util.Map;
 
 /**
  * Global exception handler — converts all exceptions to RFC 7807 Problem Details.
+ *
+ * IMPORTANT: Spring Security's ExceptionTranslationFilter only handles AccessDeniedException
+ * that propagate through the filter chain. When @PreAuthorize throws AuthorizationDeniedException
+ * (a subclass of AccessDeniedException) inside a controller method, it bypasses the filter chain
+ * and lands here. We must return 403 — NOT 500 — for both.
  */
 @Slf4j
 @RestControllerAdvice
@@ -48,6 +55,25 @@ public class GlobalExceptionHandler {
         problem.setTitle("VALIDATION_FAILED");
         problem.setProperty("timestamp", Instant.now());
         problem.setProperty("fieldErrors", fieldErrors);
+        return problem;
+    }
+
+    /**
+     * Handles both legacy AccessDeniedException and Spring Security 6's
+     * AuthorizationDeniedException (thrown by @PreAuthorize when the user lacks the
+     * required role). Returns 403 — NOT 500.
+     */
+    @ExceptionHandler({AccessDeniedException.class, AuthorizationDeniedException.class})
+    public ProblemDetail handleAccessDeniedException(Exception ex) {
+        // Log at DEBUG only — this is expected for unauthenticated/unauthorized users
+        log.debug("Access denied: {}", ex.getMessage());
+
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+            HttpStatus.FORBIDDEN, "You do not have permission to perform this action"
+        );
+        problem.setType(URI.create("https://api.marketplace.com/errors/access-denied"));
+        problem.setTitle("ACCESS_DENIED");
+        problem.setProperty("timestamp", Instant.now());
         return problem;
     }
 

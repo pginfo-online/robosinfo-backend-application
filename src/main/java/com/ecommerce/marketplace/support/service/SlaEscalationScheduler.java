@@ -23,7 +23,6 @@ public class SlaEscalationScheduler {
 
     @Scheduled(fixedDelay = 60000)
     @SchedulerLock(name = "checkTicketSlaEscalations", lockAtMostFor = "50s", lockAtLeastFor = "10s")
-    @Transactional
     public void checkSlaBreaches() {
         List<TicketStatus> activeStatuses = List.of(TicketStatus.OPEN, TicketStatus.IN_PROGRESS);
         List<SupportTicket> breached = ticketRepository.findByStatusInAndSlaDueAtBeforeAndIsEscalatedFalse(
@@ -35,11 +34,20 @@ public class SlaEscalationScheduler {
         }
 
         for (SupportTicket ticket : breached) {
-            ticket.setIsEscalated(true);
-            ticket.setPriority(TicketPriority.URGENT);
-            ticketRepository.save(ticket);
-            log.warn("SLA BREACH DETECTED: Ticket {} (ID: {}) escalated to URGENT priority",
-                ticket.getTicketNumber(), ticket.getId());
+            try {
+                escalateTicket(ticket);
+            } catch (Exception e) {
+                log.error("Failed to escalate ticket {}: {}", ticket.getTicketNumber(), e.getMessage());
+            }
         }
+    }
+
+    @Transactional
+    public void escalateTicket(SupportTicket ticket) {
+        ticket.setIsEscalated(true);
+        ticket.setPriority(TicketPriority.URGENT);
+        ticketRepository.save(ticket);
+        log.warn("SLA BREACH DETECTED: Ticket {} (ID: {}) escalated to URGENT priority",
+            ticket.getTicketNumber(), ticket.getId());
     }
 }

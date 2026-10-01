@@ -200,6 +200,40 @@ public class InventoryService {
         ledgerRepository.save(ledger);
     }
 
+    @Transactional
+    public void expireReservation(UUID reservationKey) {
+        InventoryReservation reservation = reservationRepository.findByReservationKey(reservationKey)
+            .orElseThrow(() -> new ResourceNotFoundException("Reservation", reservationKey.toString()));
+
+        if (reservation.getStatus() == ReservationStatus.RELEASED || reservation.getStatus() == ReservationStatus.EXPIRED) {
+            return; // Idempotent
+        }
+
+        if (reservation.getStatus() != ReservationStatus.HELD) {
+            return;
+        }
+
+        Inventory inventory = inventoryRepository.findByIdForUpdate(reservation.getInventoryId())
+            .orElseThrow(() -> new ResourceNotFoundException("Inventory", reservation.getInventoryId().toString()));
+
+        inventory.setReservedQty(Math.max(0, inventory.getReservedQty() - reservation.getQty()));
+        inventoryRepository.save(inventory);
+
+        reservation.setStatus(ReservationStatus.EXPIRED);
+        reservation.setReleasedAt(Instant.now());
+        reservationRepository.save(reservation);
+
+        InventoryLedger ledger = InventoryLedger.builder()
+            .inventoryId(inventory.getId())
+            .eventType(InventoryEventType.RELEASED)
+            .qtyChange(-reservation.getQty())
+            .referenceType("RESERVATION_EXPIRED")
+            .referenceId(reservation.getId())
+            .reason("Expired reservation automatically released back to available inventory")
+            .build();
+        ledgerRepository.save(ledger);
+    }
+
     @Transactional(readOnly = true)
     public InventoryStockResponse getStock(UUID variantId, UUID sellerId) {
         return inventoryRepository.findByVariantIdAndSellerId(variantId, sellerId)

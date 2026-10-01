@@ -1,6 +1,9 @@
 package com.ecommerce.marketplace.admin.service;
 
+import com.ecommerce.marketplace.admin.dto.AdminLedgerEntryResponse;
 import com.ecommerce.marketplace.admin.dto.AdminMetricsOverviewResponse;
+import com.ecommerce.marketplace.admin.dto.AdminOrderResponse;
+import com.ecommerce.marketplace.admin.dto.CustomerAccountResponse;
 import com.ecommerce.marketplace.catalog.dto.ProductResponse;
 import com.ecommerce.marketplace.catalog.model.Product;
 import com.ecommerce.marketplace.catalog.model.ProductStatus;
@@ -8,6 +11,7 @@ import com.ecommerce.marketplace.catalog.repository.ProductRepository;
 import com.ecommerce.marketplace.catalog.service.ProductService;
 import com.ecommerce.marketplace.common.dto.PageResponse;
 import com.ecommerce.marketplace.common.exception.ResourceNotFoundException;
+import com.ecommerce.marketplace.finance.repository.LedgerEntryRepository;
 import com.ecommerce.marketplace.identity.model.RoleName;
 import com.ecommerce.marketplace.identity.model.UserRole;
 import com.ecommerce.marketplace.identity.repository.UserRepository;
@@ -54,6 +58,7 @@ public class AdminService {
     private final OrderRepository orderRepository;
     private final SupportTicketRepository ticketRepository;
     private final ReturnRequestRepository returnRequestRepository;
+    private final LedgerEntryRepository ledgerEntryRepository;
 
     @Transactional
     public SellerProfileResponse approveSeller(UUID adminId, UUID sellerId) {
@@ -207,5 +212,130 @@ public class AdminService {
             .escalatedTickets(escalatedTickets)
             .totalReturns(totalReturns)
             .build();
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<AdminOrderResponse> getAllOrders(OrderStatus status, Pageable pageable) {
+        Page<Order> page = status != null
+            ? orderRepository.findByStatus(status, pageable)
+            : orderRepository.findAll(pageable);
+
+        List<AdminOrderResponse> data = page.getContent().stream()
+            .map(o -> {
+                String customerName = "Customer";
+                String customerEmail = "";
+                var userOpt = userRepository.findById(o.getCustomerId());
+                if (userOpt.isPresent()) {
+                    var u = userOpt.get();
+                    customerName = u.getName() != null ? u.getName() : "Customer " + u.getPhone();
+                    customerEmail = u.getEmail() != null ? u.getEmail() : "";
+                }
+                String sla = "ON_TRACK";
+                if (o.getStatus() == OrderStatus.PROCESSING || o.getStatus() == OrderStatus.PAID) {
+                    if (o.getCreatedAt() != null && o.getCreatedAt().isBefore(Instant.now().minusSeconds(86400))) {
+                        sla = "SLA_WARNING";
+                    }
+                }
+                return AdminOrderResponse.builder()
+                    .id(o.getId())
+                    .orderNumber(o.getOrderNumber())
+                    .customerId(o.getCustomerId())
+                    .customerName(customerName)
+                    .customerEmail(customerEmail)
+                    .amountPaisa(o.getTotalPaisa())
+                    .status(o.getStatus())
+                    .slaStatus(sla)
+                    .itemCount(o.getItems() != null ? o.getItems().size() : 0)
+                    .createdAt(o.getCreatedAt())
+                    .build();
+            })
+            .collect(Collectors.toList());
+
+        return new PageResponse<>(data, page.getTotalElements(), null, page.hasNext());
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<CustomerAccountResponse> getCustomers(Pageable pageable) {
+        Page<com.ecommerce.marketplace.identity.model.User> page = userRepository.findAll(pageable);
+
+        List<CustomerAccountResponse> data = page.getContent().stream()
+            .map(u -> {
+                List<Order> orders = orderRepository.findByCustomerIdOrderByCreatedAtDesc(u.getId(), Pageable.unpaged()).getContent();
+                long totalOrders = orders.size();
+                long totalSpentPaisa = orders.stream()
+                    .filter(o -> o.getStatus() != OrderStatus.CANCELLED)
+                    .mapToLong(Order::getTotalPaisa)
+                    .sum();
+
+                return CustomerAccountResponse.builder()
+                    .id(u.getId())
+                    .name(u.getName() != null ? u.getName() : "Customer (" + u.getPhone() + ")")
+                    .email(u.getEmail())
+                    .phone(u.getPhone())
+                    .status(u.getStatus())
+                    .totalOrders(totalOrders)
+                    .totalSpentPaisa(totalSpentPaisa)
+                    .registeredAt(u.getCreatedAt())
+                    .build();
+            })
+            .collect(Collectors.toList());
+
+        return new PageResponse<>(data, page.getTotalElements(), null, page.hasNext());
+    }
+
+    @Transactional
+    public CustomerAccountResponse updateCustomerStatus(UUID customerId, String statusStr) {
+        var user = userRepository.findById(customerId)
+            .orElseThrow(() -> new ResourceNotFoundException("Customer", customerId.toString()));
+
+        if (statusStr != null) {
+            try {
+                user.setStatus(com.ecommerce.marketplace.identity.model.UserStatus.valueOf(statusStr.toUpperCase()));
+            } catch (IllegalArgumentException e) {
+                if ("ACTIVE".equalsIgnoreCase(statusStr)) {
+                    user.setStatus(com.ecommerce.marketplace.identity.model.UserStatus.ACTIVE);
+                } else {
+                    user.setStatus(com.ecommerce.marketplace.identity.model.UserStatus.SUSPENDED);
+                }
+            }
+        }
+        user = userRepository.save(user);
+
+        List<Order> orders = orderRepository.findByCustomerIdOrderByCreatedAtDesc(user.getId(), Pageable.unpaged()).getContent();
+        long totalOrders = orders.size();
+        long totalSpentPaisa = orders.stream()
+            .filter(o -> o.getStatus() != OrderStatus.CANCELLED)
+            .mapToLong(Order::getTotalPaisa)
+            .sum();
+
+        return CustomerAccountResponse.builder()
+            .id(user.getId())
+            .name(user.getName())
+            .email(user.getEmail())
+            .phone(user.getPhone())
+            .status(user.getStatus())
+            .totalOrders(totalOrders)
+            .totalSpentPaisa(totalSpentPaisa)
+            .registeredAt(user.getCreatedAt())
+            .build();
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<AdminLedgerEntryResponse> getFinanceLedger(Pageable pageable) {
+        var page = ledgerEntryRepository.findAll(pageable);
+        List<AdminLedgerEntryResponse> data = page.getContent().stream()
+            .map(e -> AdminLedgerEntryResponse.builder()
+                .id(e.getId())
+                .transactionId(e.getTransactionId())
+                .entryType(e.getEntryType() != null ? e.getEntryType().name() : "ENTRY")
+                .amountPaisa(e.getAmountPaisa())
+                .referenceType(e.getReferenceType())
+                .referenceId(e.getReferenceId())
+                .description(e.getDescription())
+                .timestamp(e.getCreatedAt())
+                .build())
+            .collect(Collectors.toList());
+
+        return new PageResponse<>(data, page.getTotalElements(), null, page.hasNext());
     }
 }

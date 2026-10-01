@@ -28,32 +28,33 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-            .csrf(AbstractHttpConfigurer::disable) // REST API — CSRF not needed (JWT-based)
-            .cors(Customizer.withDefaults())
-            .sessionManagement(session ->
-                session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .authorizeHttpRequests(auth -> auth
-                // Public endpoints
-                .requestMatchers("/api/v1/auth/**").permitAll()
-                .requestMatchers(HttpMethod.POST, "/api/v1/sellers/register-business").permitAll()
-                .requestMatchers("/api/v1/products/**").permitAll()
-                .requestMatchers("/api/v1/categories/**").permitAll()
-                .requestMatchers("/api/v1/brands/**").permitAll()
-                .requestMatchers("/api/v1/search/**").permitAll()
-                .requestMatchers("/webhooks/**").permitAll()
-                .requestMatchers(HttpMethod.GET, "/api/v1/reviews/**").permitAll()
-                .requestMatchers(HttpMethod.GET, "/api/v1/promotions/coupons").permitAll()
-                .requestMatchers(HttpMethod.POST, "/api/v1/promotions/coupons/validate").permitAll()
-                .requestMatchers(HttpMethod.GET, "/api/v1/shipments/*/tracking").permitAll()
-                // Actuator & docs
-                .requestMatchers("/actuator/health").permitAll()
-                .requestMatchers("/api-docs/**").permitAll()
-                .requestMatchers("/swagger-ui/**").permitAll()
-                .requestMatchers("/swagger-ui.html").permitAll()
-                // Everything else requires authentication
-                .anyRequest().authenticated()
-            )
-            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+                .csrf(AbstractHttpConfigurer::disable) // REST API — CSRF not needed (JWT-based)
+                .cors(Customizer.withDefaults())
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth
+                        // Public endpoints & health checks
+                        .requestMatchers("/", "/health").permitAll()
+                        .requestMatchers("/api/v1/auth/**").permitAll()
+                        .requestMatchers("/api/v1/admin/auth/**").permitAll()
+                        .requestMatchers("/uploads/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/sellers/register-business").permitAll()
+                        .requestMatchers("/api/v1/products/**").permitAll()
+                        .requestMatchers("/api/v1/categories/**").permitAll()
+                        .requestMatchers("/api/v1/brands/**").permitAll()
+                        .requestMatchers("/api/v1/search/**").permitAll()
+                        .requestMatchers("/webhooks/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/reviews/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/promotions/coupons").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/promotions/coupons/validate").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/shipments/*/tracking").permitAll()
+                        // Actuator & docs
+                        .requestMatchers("/actuator/**").permitAll()
+                        .requestMatchers("/api-docs/**").permitAll()
+                        .requestMatchers("/swagger-ui/**").permitAll()
+                        .requestMatchers("/swagger-ui.html").permitAll()
+                        // Everything else requires authentication
+                        .anyRequest().authenticated())
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }

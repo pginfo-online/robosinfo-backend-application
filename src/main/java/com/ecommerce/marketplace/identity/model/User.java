@@ -47,10 +47,13 @@ public class User extends BaseEntity {
     private Set<UserRole> roles = new HashSet<>();
 
     public void addRole(RoleName roleName) {
-        UserRole userRole = UserRole.builder()
-            .user(this)
-            .role(roleName.name())
-            .build();
-        roles.add(userRole);
+        boolean alreadyHas = roles.stream().anyMatch(r -> roleName.name().equals(r.getRole()));
+        if (!alreadyHas) {
+            UserRole userRole = UserRole.builder()
+                .user(this)
+                .role(roleName.name())
+                .build();
+            roles.add(userRole);
+        }
     }
 }

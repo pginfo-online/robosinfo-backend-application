@@ -30,9 +30,7 @@ public class ReservationCleanupScheduler {
             log.info("Found {} expired inventory reservations to release", expired.size());
             for (InventoryReservation res : expired) {
                 try {
-                    inventoryService.releaseReservation(res.getReservationKey());
-                    res.setStatus(ReservationStatus.EXPIRED);
-                    reservationRepository.save(res);
+                    inventoryService.expireReservation(res.getReservationKey());
                 } catch (Exception e) {
                     log.error("Failed to release expired reservation {}: {}", res.getReservationKey(), e.getMessage());
                 }

@@ -5,6 +5,7 @@ import lombok.*;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -39,6 +40,13 @@ public class Category {
     @Builder.Default
     private Integer displayOrder = 0;
 
+    @Column(columnDefinition = "TEXT")
+    private String description;
+
+    @Column(name = "commission_rate_percent", precision = 5, scale = 2)
+    @Builder.Default
+    private BigDecimal commissionRatePercent = BigDecimal.TEN;
+
     @Column(name = "image_url", length = 500)
     private String imageUrl;
 
@@ -46,6 +54,7 @@ public class Category {
     @Builder.Default
     private Boolean isActive = true;
 
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
     @Column(name = "attributes_template", columnDefinition = "jsonb")
     private String attributesTemplate;
 

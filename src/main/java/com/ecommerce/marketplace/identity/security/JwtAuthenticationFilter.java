@@ -55,7 +55,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 SecurityContextHolder.getContext().setAuthentication(authentication);
             }
         } catch (Exception ex) {
-            log.error("Could not set user authentication in security context: {}", ex.getMessage());
+            log.debug("Could not set user authentication in security context: {}", ex.getMessage());
         }
 
         filterChain.doFilter(request, response);
@@ -64,8 +64,28 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private String extractJwtFromRequest(HttpServletRequest request) {
         String bearerToken = request.getHeader("Authorization");
         if (StringUtils.hasText(bearerToken) && bearerToken.startsWith("Bearer ")) {
-            return bearerToken.substring(7);
+            String token = bearerToken.substring(7).trim();
+            if (isValidTokenFormat(token)) {
+                return token;
+            }
         }
         return null;
+    }
+
+    private boolean isValidTokenFormat(String token) {
+        if (!StringUtils.hasText(token)) {
+            return false;
+        }
+        if ("undefined".equalsIgnoreCase(token) || "null".equalsIgnoreCase(token) || "[object Object]".equals(token)) {
+            return false;
+        }
+        // A valid compact JWS has 3 parts (2 periods), and a JWE has 5 parts (4 periods)
+        int dotCount = 0;
+        for (int i = 0; i < token.length(); i++) {
+            if (token.charAt(i) == '.') {
+                dotCount++;
+            }
+        }
+        return dotCount == 2 || dotCount == 4;
     }
 }
